@@ -6,14 +6,7 @@ import {Marketplace} from "@/Marketplace_1.0.0.sol";
 import {NFT} from "@/NFT.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
-
-contract TestERC721 is ERC721 {
-    constructor() ERC721("Test", "TST") {}
-
-    function mint(address account, uint256 tokenId) public {
-        _mint(account, tokenId);
-    }
-}
+import {TestERC721} from "./mocks/TestERC721.sol";
 
 contract BaseMarketplaceTest is Test {
     TestERC721 public erc721;

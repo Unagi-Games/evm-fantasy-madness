@@ -67,7 +67,7 @@ contract DistributionManager is AccessControl, Pausable {
      * - Caller must have role DISTRIBUTOR_ROLE.
      * - UID must not have been already distributed.
      */
-    function distribute(string memory UID, address to, uint256 tokenAmount, uint256, uint256[] memory tokenIds)
+    function distribute(string memory UID, address to, uint256 tokenAmount, uint256[] memory tokenIds)
         external
         payable
         onlyRole(DISTRIBUTOR_ROLE)
