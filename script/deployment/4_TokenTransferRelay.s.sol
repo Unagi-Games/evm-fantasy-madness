@@ -9,7 +9,7 @@ contract DeployDistributionManager is Script {
     function run() external {
         address tokenAddress = vm.envAddress("TOKEN_ADDRESS");
         address nftAddress = new DeployNFT().getAddress();
-        address nativeReceiver = vm.envAddress("NATIVE_TRANSFER_RELAY_NFT_RECEIVER");
+        address nativeReceiver = vm.envAddress("TOKEN_TRANSFER_RELAY_NATIVE_RECEIVER");
         address nftReceiver = vm.envAddress("TOKEN_TRANSFER_RELAY_NFT_RECEIVER");
         address tokenReceiver = vm.envAddress("TOKEN_TRANSFER_RELAY_TOKEN_RECEIVER");
         address admin = vm.envAddress("ADMIN_TIMELOCK_2D");

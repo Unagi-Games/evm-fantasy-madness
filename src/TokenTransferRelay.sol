@@ -10,23 +10,19 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 /**
  * @title TokenTransferRelay
- * @dev TokenTransferRelay smart contract implements a two-step token transfer service that allows for refundable token transfers.
- * Each contract instance can relay only one ERC20 / ERC721 tokens per deployment.
+ * @dev A two-step transfer service for native tokens, ERC20, and ERC721 tokens that supports refunds.
+ * Each contract instance manages one set of ERC20/ERC721 token contracts.
  *
- * ERC20 / ERC721 token transfers can be reserved by a token holder, by calling the `reserveTransfer` function.
- * This places the token holder's funds in escrow, allowing for later execution, or refund of the transfer.
+ * Transfer flow:
+ * 1. Token holder reserves a transfer by calling `reserveTransfer`, placing funds in escrow
+ * 2. Operator executes the transfer with `executeTransferFrom` to send funds to configured receivers
+ * 3. Alternatively, operator can refund the transfer with `revertTransfer`
  *
- * Calling `executeTransfer` executes a reserved token transfer, relaying the funds under escrow to either ERC721Receiver, or ERC20Receiver.
- * Alternatively, a reserved transfer can be refunded back to the original token holder by calling `revertTransfer`. Only accounts
- * granted OPERATOR_ROLE can call this function.
+ * Token holders must approve the contract before transfers.
+ * Operators must have OPERATOR_ROLE to execute or revert transfers.
+ * Maintenance accounts with MAINTENANCE_ROLE can configure receiver addresses.
  *
- * The token holder must always give the necessary approval and allowance to the contract for it to manage their funds.
- *
- * The contract also provides the option to reserve and execute token transfers on behalf of a token holder by using
- * the `reserveTransferFrom` and `executeTransferFrom` functions, respectively.
- *
- * The ERC721Receiver and ERC20Receiver addresses can be configured by accounts granted MAINTENANCE_ROLE.
- *
+ * @custom:security-contact security@unagi.ch
  */
 contract TokenTransferRelay is IERC721Receiver, AccessControl {
     using SafeERC20 for IERC20;
@@ -136,7 +132,7 @@ contract TokenTransferRelay is IERC721Receiver, AccessControl {
         return state == TRANSFER_EXECUTED || state == TRANSFER_REVERTED;
     }
 
-    function reserveTransfer(bytes32 UID, uint256[] calldata tokenIds, uint256 amount) external {
+    function reserveTransfer(bytes32 UID, uint256[] calldata tokenIds, uint256 amount) external payable {
         _reserveTransfer(UID, msg.sender, tokenIds, amount);
     }
 
