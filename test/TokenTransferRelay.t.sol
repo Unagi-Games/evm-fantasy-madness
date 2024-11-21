@@ -6,11 +6,14 @@ import {TokenTransferRelay} from "@/TokenTransferRelay.sol";
 import {TestERC20} from "./mocks/TestERC20.sol";
 import {TestERC721} from "./mocks/TestERC721.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract BaseTransferRelayTest is Test {
     TestERC721 public nft;
     TestERC20 public token;
     TokenTransferRelay public relay;
+
+    uint256 public operatorKey;
 
     address public payer = makeAddr("holder");
     address public receiver = makeAddr("receiver");
@@ -21,10 +24,54 @@ contract BaseTransferRelayTest is Test {
 
         relay = new TokenTransferRelay(address(nft), address(token), receiver, receiver, receiver);
 
+        (, operatorKey) = makeAddrAndKey("operator");
+        relay.grantRole(relay.OPERATOR_ROLE(), vm.addr(operatorKey));
+
         vm.startPrank(payer);
         nft.setApprovalForAll(address(relay), true);
         token.approve(address(relay), type(uint256).max);
         vm.stopPrank();
+    }
+
+    function reserveTransfer(string memory UID, uint256 nativeAmount, uint256[] memory tokenIds, uint256 erc20Amount)
+        public
+    {
+        TokenTransferRelay.Signature memory signature = generateSignature(UID, nativeAmount, tokenIds, erc20Amount);
+        relay.reserveTransfer{value: nativeAmount}(UID, tokenIds, erc20Amount, signature);
+    }
+
+    function generateSignature(string memory UID, uint256 nativeAmount, uint256[] memory tokenIds, uint256 erc20Amount)
+        public
+        view
+        returns (TokenTransferRelay.Signature memory)
+    {
+        return generateCustomSignature(
+            operatorKey, uint40(block.timestamp + 1 days), UID, nativeAmount, tokenIds, erc20Amount
+        );
+    }
+
+    function generateCustomSignature(
+        uint256 operatorKey_,
+        uint40 expiration,
+        string memory UID,
+        uint256 nativeAmount,
+        uint256[] memory tokenIds,
+        uint256 erc20Amount
+    ) public view returns (TokenTransferRelay.Signature memory) {
+        address operator_ = vm.addr(operatorKey_);
+
+        bytes32 messageHash = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(
+                abi.encodePacked(
+                    operator_, expiration, block.chainid, address(relay), UID, nativeAmount, tokenIds, erc20Amount
+                )
+            )
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(operatorKey_, messageHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        return TokenTransferRelay.Signature({authorizer: operator_, expiration: expiration, value: signature});
     }
 }
 
@@ -40,10 +87,10 @@ contract TransferRelayUserTest is BaseTransferRelayTest {
         vm.startPrank(payer);
 
         vm.expectEmit();
-        emit TokenTransferRelay.TransferReserved(keccak256("TRANSFER_UID"), payer, nativeAmount, nfts, tokenAmount);
-        relay.reserveTransfer{value: nativeAmount}(keccak256("TRANSFER_UID"), nfts, tokenAmount);
+        emit TokenTransferRelay.TransferReserved("TRANSFER_UID", nativeAmount, nfts, tokenAmount);
+        reserveTransfer("TRANSFER_UID", nativeAmount, nfts, tokenAmount);
 
-        assertTrue(relay.isTransferReserved(keccak256("TRANSFER_UID"), payer));
+        assertTrue(relay.isTransferReserved("TRANSFER_UID"));
         assertEq(address(relay).balance, nativeAmount);
         assertEq(token.balanceOf(address(relay)), tokenAmount);
         for (uint256 i = 0; i < nfts.length; i++) {
@@ -53,10 +100,10 @@ contract TransferRelayUserTest is BaseTransferRelayTest {
 
     function test_RevertDuplicateReservation() public {
         vm.startPrank(payer);
-        relay.reserveTransfer(keccak256("TRANSFER_UID"), new uint256[](0), 0);
+        reserveTransfer("TRANSFER_UID", 0, new uint256[](0), 0);
 
         vm.expectRevert("TokenTransferRelay: Transfer already reserved");
-        relay.reserveTransfer(keccak256("TRANSFER_UID"), new uint256[](0), 0);
+        reserveTransfer("TRANSFER_UID", 0, new uint256[](0), 0);
         vm.stopPrank();
     }
 
@@ -64,14 +111,14 @@ contract TransferRelayUserTest is BaseTransferRelayTest {
         relay.grantRole(relay.OPERATOR_ROLE(), address(this));
 
         vm.prank(payer);
-        relay.reserveTransfer(keccak256("TRANSFER_UID"), new uint256[](0), 0);
+        reserveTransfer("TRANSFER_UID", 0, new uint256[](0), 0);
 
         vm.prank(address(this));
-        relay.executeTransferFrom(keccak256("TRANSFER_UID"), payer);
+        relay.executeTransfer("TRANSFER_UID");
 
         vm.startPrank(payer);
         vm.expectRevert("TokenTransferRelay: Transfer already processed");
-        relay.reserveTransfer(keccak256("TRANSFER_UID"), new uint256[](0), 0);
+        reserveTransfer("TRANSFER_UID", 0, new uint256[](0), 0);
         vm.stopPrank();
     }
 }
@@ -79,7 +126,7 @@ contract TransferRelayUserTest is BaseTransferRelayTest {
 contract TransferRelayOperatorTest is BaseTransferRelayTest {
     function test_RevertNonOperatorExecute() public {
         vm.prank(payer);
-        relay.reserveTransfer(keccak256("TRANSFER_UID"), new uint256[](0), 0);
+        reserveTransfer("TRANSFER_UID", 0, new uint256[](0), 0);
 
         vm.startPrank(makeAddr("nonOperator"));
         vm.expectRevert(
@@ -87,12 +134,12 @@ contract TransferRelayOperatorTest is BaseTransferRelayTest {
                 IAccessControl.AccessControlUnauthorizedAccount.selector, makeAddr("nonOperator"), relay.OPERATOR_ROLE()
             )
         );
-        relay.executeTransferFrom(keccak256("TRANSFER_UID"), payer);
+        relay.executeTransfer("TRANSFER_UID");
     }
 
     function test_RevertNonOperatorRevert() public {
         vm.prank(payer);
-        relay.reserveTransfer(keccak256("TRANSFER_UID"), new uint256[](0), 0);
+        reserveTransfer("TRANSFER_UID", 0, new uint256[](0), 0);
 
         vm.startPrank(makeAddr("nonOperator"));
         vm.expectRevert(
@@ -100,7 +147,7 @@ contract TransferRelayOperatorTest is BaseTransferRelayTest {
                 IAccessControl.AccessControlUnauthorizedAccount.selector, makeAddr("nonOperator"), relay.OPERATOR_ROLE()
             )
         );
-        relay.revertTransfer(keccak256("TRANSFER_UID"), payer);
+        relay.revertTransfer("TRANSFER_UID");
     }
 
     function test_ExecuteTransfer(uint256 nativeAmount, uint8 nftCount, uint256 tokenAmount) public {
@@ -114,14 +161,14 @@ contract TransferRelayOperatorTest is BaseTransferRelayTest {
         deal(address(token), payer, tokenAmount);
 
         vm.prank(payer);
-        relay.reserveTransfer{value: nativeAmount}(keccak256("TRANSFER_UID"), nfts, tokenAmount);
+        reserveTransfer("TRANSFER_UID", nativeAmount, nfts, tokenAmount);
 
         vm.prank(address(this));
         vm.expectEmit();
-        emit TokenTransferRelay.TransferExecuted(keccak256("TRANSFER_UID"), payer);
-        relay.executeTransferFrom(keccak256("TRANSFER_UID"), payer);
+        emit TokenTransferRelay.TransferExecuted("TRANSFER_UID");
+        relay.executeTransfer("TRANSFER_UID");
 
-        assertTrue(relay.isTransferProcessed(keccak256("TRANSFER_UID"), payer));
+        assertTrue(relay.isTransferProcessed("TRANSFER_UID"));
         assertEq(address(relay).balance, 0);
         assertEq(token.balanceOf(address(relay)), 0);
         assertEq(receiver.balance, nativeAmount);
@@ -142,14 +189,14 @@ contract TransferRelayOperatorTest is BaseTransferRelayTest {
         deal(address(token), payer, tokenAmount);
 
         vm.prank(payer);
-        relay.reserveTransfer{value: nativeAmount}(keccak256("TRANSFER_UID"), nfts, tokenAmount);
+        reserveTransfer("TRANSFER_UID", nativeAmount, nfts, tokenAmount);
 
         vm.prank(address(this));
         vm.expectEmit();
-        emit TokenTransferRelay.TransferReverted(keccak256("TRANSFER_UID"), payer);
-        relay.revertTransfer(keccak256("TRANSFER_UID"), payer);
+        emit TokenTransferRelay.TransferReverted("TRANSFER_UID");
+        relay.revertTransfer("TRANSFER_UID");
 
-        assertTrue(relay.isTransferProcessed(keccak256("TRANSFER_UID"), payer));
+        assertTrue(relay.isTransferProcessed("TRANSFER_UID"));
         assertEq(address(relay).balance, 0);
         assertEq(token.balanceOf(address(relay)), 0);
         assertEq(payer.balance, nativeAmount);
@@ -171,5 +218,83 @@ contract TransferRelayMaintenanceTest is BaseTransferRelayTest {
             )
         );
         relay.setNativeReceiver(payable(makeAddr("newReceiver")));
+    }
+}
+
+contract TransferRelaySignatureTest is BaseTransferRelayTest {
+    function test_RevertIfNotOperator() public {
+        string memory UID = "TRANSFER_UID";
+        (, uint256 nonOperatorKey) = makeAddrAndKey("nonOperator");
+        uint256[] memory tokenIds = new uint256[](0);
+
+        TokenTransferRelay.Signature memory signature =
+            generateCustomSignature(nonOperatorKey, uint40(block.timestamp + 1 days), UID, 1 ether, tokenIds, 0);
+
+        deal(payer, 1 ether);
+        vm.prank(payer);
+        vm.expectRevert("TokenTransferRelay: Missing role OPERATOR_ROLE for authorizer");
+        relay.reserveTransfer{value: 1 ether}(UID, tokenIds, 0, signature);
+    }
+
+    function test_RevertIfWrongSignature() public {
+        string memory UID = "TRANSFER_UID";
+        (, uint256 nonOperatorKey) = makeAddrAndKey("nonOperator");
+        uint256[] memory tokenIds = new uint256[](0);
+
+        // Sign with a nonOperator and try to mimic the real operator.
+        TokenTransferRelay.Signature memory signature =
+            generateCustomSignature(nonOperatorKey, uint40(block.timestamp + 1 days), UID, 1 ether, tokenIds, 0);
+        signature.authorizer = vm.addr(operatorKey);
+
+        deal(payer, 1 ether);
+        vm.prank(payer);
+        vm.expectRevert("TokenTransferRelay: Invalid Signature");
+        relay.reserveTransfer{value: 1 ether}(UID, tokenIds, 0, signature);
+    }
+
+    function test_RevertIfExpired() public {
+        string memory UID = "TRANSFER_UID";
+        uint256[] memory tokenIds = new uint256[](0);
+        uint40 expiredTimestamp = uint40(block.timestamp - 1);
+
+        TokenTransferRelay.Signature memory signature =
+            generateCustomSignature(operatorKey, expiredTimestamp, UID, 1 ether, tokenIds, 0);
+
+        deal(payer, 1 ether);
+        vm.prank(payer);
+        vm.expectRevert("TokenTransferRelay: Signature expired");
+        relay.reserveTransfer{value: 1 ether}(UID, tokenIds, 0, signature);
+    }
+
+    function test_RevertIfWrongAmount() public {
+        string memory UID = "TRANSFER_UID";
+        uint256[] memory tokenIds = new uint256[](0);
+        uint256 signedAmount = 1 ether;
+        uint256 sentAmount = 2 ether;
+
+        TokenTransferRelay.Signature memory signature = generateSignature(UID, signedAmount, tokenIds, 0);
+
+        deal(payer, sentAmount);
+        vm.prank(payer);
+        vm.expectRevert("TokenTransferRelay: Invalid Signature");
+        relay.reserveTransfer{value: sentAmount}(UID, tokenIds, 0, signature);
+    }
+
+    function test_RevertIfDuplicateUID() public {
+        string memory UID = "TRANSFER_UID";
+        uint256[] memory tokenIds = new uint256[](0);
+        uint256 nativeAmount = 1 ether;
+
+        TokenTransferRelay.Signature memory signature = generateSignature(UID, nativeAmount, tokenIds, 0);
+
+        deal(payer, nativeAmount * 2);
+        // First reservation succeeds
+        vm.prank(payer);
+        relay.reserveTransfer{value: nativeAmount}(UID, tokenIds, 0, signature);
+
+        // Second reservation fails
+        vm.prank(payer);
+        vm.expectRevert("TokenTransferRelay: Transfer already reserved");
+        relay.reserveTransfer{value: nativeAmount}(UID, tokenIds, 0, signature);
     }
 }

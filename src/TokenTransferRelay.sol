@@ -7,6 +7,8 @@ import {IERC721Receiver} from "@openzeppelin/contracts/interfaces/IERC721Receive
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 
 /**
  * @title TokenTransferRelay
@@ -14,12 +16,12 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
  * Each contract instance manages one set of ERC20/ERC721 token contracts.
  *
  * Transfer flow:
- * 1. Token holder reserves a transfer by calling `reserveTransfer`, placing funds in escrow
- * 2. Operator executes the transfer with `executeTransferFrom` to send funds to configured receivers
+ * 1. Token holder reserves a transfer by calling `reserveTransfer` with a signed authorization, placing funds in escrow
+ * 2. Operator executes the transfer with `executeTransfer` to send funds to configured receivers
  * 3. Alternatively, operator can refund the transfer with `revertTransfer`
  *
  * Token holders must approve the contract before transfers.
- * Operators must have OPERATOR_ROLE to execute or revert transfers.
+ * Operators must have OPERATOR_ROLE to execute transfers, revert transfers, and sign authorizations.
  * Maintenance accounts with MAINTENANCE_ROLE can configure receiver addresses.
  *
  * @custom:security-contact security@unagi.ch
@@ -58,8 +60,14 @@ contract TokenTransferRelay is IERC721Receiver, AccessControl {
         bytes32 state;
     }
 
-    // (keccak256 UID => Transfer) mapping of transfer operations
-    mapping(bytes32 => Transfer) private _transfers;
+    struct Signature {
+        uint40 expiration;
+        address authorizer;
+        bytes value;
+    }
+
+    // (UID => Transfer) mapping of transfer operations
+    mapping(string => Transfer) private _transfers;
 
     constructor(
         address _erc721,
@@ -115,35 +123,57 @@ contract TokenTransferRelay is IERC721Receiver, AccessControl {
         ERC20Receiver = _erc20Receiver;
     }
 
-    function getTransferKey(bytes32 UID, address from) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked(UID, from));
+    function getTransfer(string memory UID) public view returns (Transfer memory) {
+        return _transfers[UID];
     }
 
-    function getTransfer(bytes32 UID, address from) public view returns (Transfer memory) {
-        return _transfers[getTransferKey(UID, from)];
+    function isTransferReserved(string memory UID) public view returns (bool) {
+        return getTransfer(UID).state == TRANSFER_RESERVED;
     }
 
-    function isTransferReserved(bytes32 UID, address from) public view returns (bool) {
-        return getTransfer(UID, from).state == TRANSFER_RESERVED;
-    }
-
-    function isTransferProcessed(bytes32 UID, address from) public view returns (bool) {
-        bytes32 state = getTransfer(UID, from).state;
+    function isTransferProcessed(string memory UID) public view returns (bool) {
+        bytes32 state = getTransfer(UID).state;
         return state == TRANSFER_EXECUTED || state == TRANSFER_REVERTED;
     }
 
-    function reserveTransfer(bytes32 UID, uint256[] calldata tokenIds, uint256 amount) external payable {
-        _reserveTransfer(UID, msg.sender, tokenIds, amount);
+    function reserveTransfer(
+        string memory UID,
+        uint256[] calldata tokenIds,
+        uint256 erc20Amount,
+        Signature calldata signature
+    ) external payable {
+        require(!isTransferReserved(UID), "TokenTransferRelay: Transfer already reserved");
+        require(!isTransferProcessed(UID), "TokenTransferRelay: Transfer already processed");
+        _verifySignature(signature, UID, msg.value, tokenIds, erc20Amount);
+
+        // Save new Transfer instance to storage
+        _transfers[UID] = Transfer(msg.sender, msg.value, tokenIds, erc20Amount, TRANSFER_RESERVED);
+
+        // Place tokens under escrow
+        _batchERC721Transfer(msg.sender, address(this), tokenIds);
+        _ERC20Transfer(msg.sender, address(this), erc20Amount);
+
+        emit TransferReserved(UID, msg.value, tokenIds, erc20Amount);
     }
 
-    function executeTransferFrom(bytes32 UID, address from) external onlyRole(OPERATOR_ROLE) {
-        _executeTransfer(UID, from);
+    function executeTransfer(string memory UID) external onlyRole(OPERATOR_ROLE) {
+        require(isTransferReserved(UID), "TokenTransferRelay: Transfer is not reserved");
+
+        Transfer storage transfer = _transfers[UID];
+        transfer.state = TRANSFER_EXECUTED;
+
+        (bool success,) = NativeReceiver.call{value: transfer.nativeAmount}("");
+        require(success);
+        _batchERC721Transfer(address(this), ERC721Receiver, transfer.erc721Ids);
+        _ERC20Transfer(address(this), ERC20Receiver, transfer.erc20Amount);
+
+        emit TransferExecuted(UID);
     }
 
-    function revertTransfer(bytes32 UID, address from) external onlyRole(OPERATOR_ROLE) {
-        require(isTransferReserved(UID, from), "TokenTransferRelay: Transfer is not reserved");
+    function revertTransfer(string memory UID) external onlyRole(OPERATOR_ROLE) {
+        require(isTransferReserved(UID), "TokenTransferRelay: Transfer is not reserved");
 
-        Transfer storage transfer = _transfers[getTransferKey(UID, from)];
+        Transfer storage transfer = _transfers[UID];
         transfer.state = TRANSFER_REVERTED;
 
         (bool success,) = transfer.from.call{value: transfer.nativeAmount}("");
@@ -151,7 +181,7 @@ contract TokenTransferRelay is IERC721Receiver, AccessControl {
         _batchERC721Transfer(address(this), transfer.from, transfer.erc721Ids);
         _ERC20Transfer(address(this), transfer.from, transfer.erc20Amount);
 
-        emit TransferReverted(UID, from);
+        emit TransferReverted(UID);
     }
 
     /**
@@ -182,35 +212,51 @@ contract TokenTransferRelay is IERC721Receiver, AccessControl {
         }
     }
 
-    function _reserveTransfer(bytes32 UID, address from, uint256[] calldata tokenIds, uint256 amount) private {
-        require(!isTransferReserved(UID, from), "TokenTransferRelay: Transfer already reserved");
-        require(!isTransferProcessed(UID, from), "TokenTransferRelay: Transfer already processed");
-
-        // Save new Transfer instance to storage
-        _transfers[getTransferKey(UID, from)] = Transfer(from, msg.value, tokenIds, amount, TRANSFER_RESERVED);
-
-        // Place tokens under escrow
-        _batchERC721Transfer(from, address(this), tokenIds);
-        _ERC20Transfer(from, address(this), amount);
-
-        emit TransferReserved(UID, from, msg.value, tokenIds, amount);
+    /**
+     * @notice Internal function to verify a signature
+     * @dev The signature must be signed by an operator and contain:
+     * - authorizer (the operator address)
+     * - expiration timestamp
+     * - contract chain id and address (anti-replay)
+     * - transfer UID (uniqueness)
+     * - native/token/nft amounts
+     */
+    function _verifySignature(
+        Signature calldata signature,
+        string memory UID,
+        uint256 nativeAmount,
+        uint256[] calldata tokenIds,
+        uint256 erc20Amount
+    ) internal view {
+        require(
+            hasRole(OPERATOR_ROLE, signature.authorizer),
+            "TokenTransferRelay: Missing role OPERATOR_ROLE for authorizer"
+        );
+        require(block.timestamp <= signature.expiration, "TokenTransferRelay: Signature expired");
+        require(
+            SignatureChecker.isValidSignatureNow(
+                signature.authorizer,
+                MessageHashUtils.toEthSignedMessageHash(
+                    keccak256(
+                        abi.encodePacked(
+                            signature.authorizer,
+                            signature.expiration,
+                            block.chainid,
+                            address(this),
+                            UID,
+                            nativeAmount,
+                            tokenIds,
+                            erc20Amount
+                        )
+                    )
+                ),
+                signature.value
+            ),
+            "TokenTransferRelay: Invalid Signature"
+        );
     }
 
-    function _executeTransfer(bytes32 UID, address from) private {
-        require(isTransferReserved(UID, from), "TokenTransferRelay: Transfer is not reserved");
-
-        Transfer storage transfer = _transfers[getTransferKey(UID, from)];
-        transfer.state = TRANSFER_EXECUTED;
-
-        (bool success,) = NativeReceiver.call{value: transfer.nativeAmount}("");
-        require(success);
-        _batchERC721Transfer(address(this), ERC721Receiver, transfer.erc721Ids);
-        _ERC20Transfer(address(this), ERC20Receiver, transfer.erc20Amount);
-
-        emit TransferExecuted(UID, from);
-    }
-
-    event TransferReserved(bytes32 UID, address from, uint256 nativeAmount, uint256[] erc721Ids, uint256 erc20Amount);
-    event TransferExecuted(bytes32 UID, address from);
-    event TransferReverted(bytes32 UID, address from);
+    event TransferReserved(string UID, uint256 nativeAmount, uint256[] erc721Ids, uint256 erc20Amount);
+    event TransferExecuted(string UID);
+    event TransferReverted(string UID);
 }
