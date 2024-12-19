@@ -14,7 +14,7 @@ contract BaseMarketplaceTest is Test {
     address public buyer = makeAddr("buyer");
     address public seller = makeAddr("seller");
     uint64 public nft = 1;
-    uint256 public salePrice = 100;
+    uint256 public listingPrice = 100;
 
     function setUp() public virtual {
         erc721 = new TestERC721();
@@ -24,36 +24,36 @@ contract BaseMarketplaceTest is Test {
     }
 }
 
-contract MarketplaceCreateSale is BaseMarketplaceTest {
-    function test_CreateSale() public {
+contract MarketplaceCreateListing is BaseMarketplaceTest {
+    function test_CreateListing() public {
         erc721.mint(seller, nft);
         vm.startPrank(seller);
         erc721.approve(address(marketplace), nft);
 
         vm.expectEmit();
-        emit Marketplace.SaleCreated(nft, salePrice, seller, address(0));
-        marketplace.createSaleFrom(seller, nft, salePrice);
-        (uint256 mSalePrice, address reservedFor) = marketplace.getSale(nft);
-        assertEq(mSalePrice, salePrice);
+        emit Marketplace.ListingCreated(nft, listingPrice, seller, address(0));
+        marketplace.createListingFrom(seller, nft, listingPrice);
+        (uint256 mListingPrice, address reservedFor) = marketplace.getListing(nft);
+        assertEq(mListingPrice, listingPrice);
         assertEq(reservedFor, address(0));
         assertTrue(marketplace.isReservationOpenFor(makeAddr("Any buyer"), nft));
     }
 
-    function test_CreateSaleReserved() public {
+    function test_CreateListingReserved() public {
         erc721.mint(seller, nft);
         vm.startPrank(seller);
         erc721.approve(address(marketplace), nft);
 
-        marketplace.createSaleFrom(seller, nft, salePrice, buyer);
-        (uint256 mSalePrice, address reservedFor) = marketplace.getSale(nft);
-        assertEq(mSalePrice, salePrice);
+        marketplace.createListingFrom(seller, nft, listingPrice, buyer);
+        (uint256 mListingPrice, address reservedFor) = marketplace.getListing(nft);
+        assertEq(mListingPrice, listingPrice);
         assertEq(reservedFor, buyer);
         assertTrue(marketplace.isReservationOpenFor(buyer, nft));
         assertTrue(marketplace.hasReservedOffer(buyer, nft));
         assertFalse(marketplace.isReservationOpenFor(makeAddr("Any buyer"), nft));
     }
 
-    function test_CreateSaleOperator() public {
+    function test_CreateListingOperator() public {
         address operator = makeAddr("operator");
         erc721.mint(seller, nft);
         vm.prank(seller);
@@ -62,230 +62,230 @@ contract MarketplaceCreateSale is BaseMarketplaceTest {
         erc721.approve(address(marketplace), nft);
 
         vm.expectEmit();
-        emit Marketplace.SaleCreated(nft, salePrice, seller, address(0));
-        marketplace.createSaleFrom(seller, nft, salePrice);
+        emit Marketplace.ListingCreated(nft, listingPrice, seller, address(0));
+        marketplace.createListingFrom(seller, nft, listingPrice);
 
-        assertTrue(marketplace.hasSale(nft));
+        assertTrue(marketplace.hasListing(nft));
     }
 
-    function test_CreateSaleRevertIfMarketplaceNotApproved() public {
+    function test_CreateListingRevertIfMarketplaceNotApproved() public {
         erc721.mint(seller, nft);
 
         vm.startPrank(seller);
         vm.expectRevert("Marketplace: Contract should be approved by the token owner");
-        marketplace.createSaleFrom(seller, nft, salePrice);
+        marketplace.createListingFrom(seller, nft, listingPrice);
     }
 
-    function test_CreateSaleRevertIfSellerNotOwner() public {
+    function test_CreateListingRevertIfSellerNotOwner() public {
         erc721.mint(makeAddr("Any wallet"), nft);
 
         vm.startPrank(seller);
-        vm.expectRevert("Marketplace: Create sale of token that is not own");
-        marketplace.createSaleFrom(seller, nft, salePrice);
+        vm.expectRevert("Marketplace: Create listing of token that is not own");
+        marketplace.createListingFrom(seller, nft, listingPrice);
     }
 
-    function test_CreateSaleRevertIfOperatorNotApproved() public {
+    function test_CreateListingRevertIfOperatorNotApproved() public {
         erc721.mint(seller, nft);
         vm.prank(seller);
         erc721.approve(address(marketplace), nft);
 
         vm.startPrank(makeAddr("operator"));
-        vm.expectRevert("Marketplace: Only the token owner or its operator are allowed to create a sale");
-        marketplace.createSaleFrom(seller, nft, salePrice);
+        vm.expectRevert("Marketplace: Only the token owner or its operator are allowed to create a listing");
+        marketplace.createListingFrom(seller, nft, listingPrice);
     }
 
-    function test_CreateSaleRevertIfPriceZero() public {
+    function test_CreateListingRevertIfPriceZero() public {
         erc721.mint(seller, nft);
         vm.startPrank(seller);
         erc721.approve(address(marketplace), nft);
 
         vm.expectRevert("Marketplace: Price should be strictly positive");
-        marketplace.createSaleFrom(seller, nft, 0);
+        marketplace.createListingFrom(seller, nft, 0);
     }
 }
 
-contract MarketplaceUpdateSale is BaseMarketplaceTest {
+contract MarketplaceUpdateListing is BaseMarketplaceTest {
     function setUp() public override {
         super.setUp();
         erc721.mint(seller, nft);
         vm.startPrank(seller);
         erc721.approve(address(marketplace), nft);
-        marketplace.createSaleFrom(seller, nft, salePrice);
+        marketplace.createListingFrom(seller, nft, listingPrice);
         vm.stopPrank();
     }
 
-    function test_UpdateSale() public {
-        uint256 updatedSalePrice = 100;
+    function test_UpdateListing() public {
+        uint256 updatedListingPrice = 100;
         address updatedReservedFor = makeAddr("Updated reserved for");
         vm.startPrank(seller);
 
         vm.expectEmit();
-        emit Marketplace.SaleUpdated(nft, updatedSalePrice, seller, updatedReservedFor);
-        marketplace.updateSaleFrom(seller, nft, updatedSalePrice, updatedReservedFor);
-        (uint256 mSalePrice, address reservedFor) = marketplace.getSale(nft);
-        assertEq(mSalePrice, updatedSalePrice);
+        emit Marketplace.ListingUpdated(nft, updatedListingPrice, seller, updatedReservedFor);
+        marketplace.updateListingFrom(seller, nft, updatedListingPrice, updatedReservedFor);
+        (uint256 mListingPrice, address reservedFor) = marketplace.getListing(nft);
+        assertEq(mListingPrice, updatedListingPrice);
         assertEq(reservedFor, updatedReservedFor);
     }
 
-    function test_UpdateSaleOperator() public {
+    function test_UpdateListingOperator() public {
         address operator = makeAddr("operator");
         vm.prank(seller);
         erc721.setApprovalForAll(operator, true);
 
         vm.startPrank(operator);
-        uint256 updatedSalePrice = 100;
+        uint256 updatedListingPrice = 100;
         address updatedReservedFor = makeAddr("Updated reserved for");
 
         vm.expectEmit();
-        emit Marketplace.SaleUpdated(nft, updatedSalePrice, seller, updatedReservedFor);
-        marketplace.updateSaleFrom(seller, nft, updatedSalePrice, updatedReservedFor);
-        (uint256 mSalePrice, address reservedFor) = marketplace.getSale(nft);
-        assertEq(mSalePrice, updatedSalePrice);
+        emit Marketplace.ListingUpdated(nft, updatedListingPrice, seller, updatedReservedFor);
+        marketplace.updateListingFrom(seller, nft, updatedListingPrice, updatedReservedFor);
+        (uint256 mListingPrice, address reservedFor) = marketplace.getListing(nft);
+        assertEq(mListingPrice, updatedListingPrice);
         assertEq(reservedFor, updatedReservedFor);
     }
 
-    function test_UpdateSaleRevertIfNotOwner() public {
+    function test_UpdateListingRevertIfNotOwner() public {
         vm.startPrank(makeAddr("Any wallet"));
 
-        vm.expectRevert("Marketplace: Only the NFT owner or its operator are allowed to update a sale");
-        marketplace.updateSaleFrom(seller, nft, 1, address(0));
+        vm.expectRevert("Marketplace: Only the NFT owner or its operator are allowed to update a listing");
+        marketplace.updateListingFrom(seller, nft, 1, address(0));
     }
 
-    function test_UpdateSaleRevertIfZero() public {
+    function test_UpdateListingRevertIfZero() public {
         vm.startPrank(seller);
 
         vm.expectRevert("Marketplace: Price should be strictly positive");
-        marketplace.updateSaleFrom(seller, nft, 0, address(0));
+        marketplace.updateListingFrom(seller, nft, 0, address(0));
     }
 }
 
-contract MarketplaceAcceptSale is BaseMarketplaceTest {
+contract MarketplaceAcceptListing is BaseMarketplaceTest {
     function setUp() public override {
         super.setUp();
         erc721.mint(seller, nft);
         vm.startPrank(seller);
         erc721.approve(address(marketplace), nft);
-        marketplace.createSaleFrom(seller, nft, salePrice);
+        marketplace.createListingFrom(seller, nft, listingPrice);
         vm.stopPrank();
     }
 
-    function test_AcceptSale() public {
-        startHoax(buyer, salePrice);
+    function test_AcceptListing() public {
+        startHoax(buyer, listingPrice);
 
         vm.expectEmit();
-        emit Marketplace.SaleAccepted(nft, salePrice, seller, buyer);
-        marketplace.acceptSale{value: salePrice}(nft);
+        emit Marketplace.ListingAccepted(nft, listingPrice, seller, buyer);
+        marketplace.acceptListing{value: listingPrice}(nft);
 
-        assertFalse(marketplace.hasSale(nft));
+        assertFalse(marketplace.hasListing(nft));
         assertEq(erc721.ownerOf(nft), buyer);
         assertEq(buyer.balance, 0);
-        assertEq(seller.balance, salePrice);
+        assertEq(seller.balance, listingPrice);
     }
 
-    function test_AcceptSaleForSomeone() public {
+    function test_AcceptListingForSomeone() public {
         address anyWallet = makeAddr("Any wallet");
-        startHoax(buyer, salePrice);
-        marketplace.acceptSale{value: salePrice}(nft, anyWallet);
+        startHoax(buyer, listingPrice);
+        marketplace.acceptListing{value: listingPrice}(nft, anyWallet);
 
-        assertFalse(marketplace.hasSale(nft));
+        assertFalse(marketplace.hasListing(nft));
         assertEq(erc721.ownerOf(nft), anyWallet);
         assertEq(buyer.balance, 0);
-        assertEq(seller.balance, salePrice);
+        assertEq(seller.balance, listingPrice);
     }
 
-    function test_AcceptSaleRevertWithoutPayment() public {
-        startHoax(buyer, salePrice - 1);
+    function test_AcceptListingRevertWithoutPayment() public {
+        startHoax(buyer, listingPrice - 1);
 
-        vm.expectRevert("Marketplace: Value is lower than buyer sale price");
-        marketplace.acceptSale{value: salePrice - 1}(nft);
+        vm.expectRevert("Marketplace: Value is lower than buyer listing price");
+        marketplace.acceptListing{value: listingPrice - 1}(nft);
     }
 
-    function test_AcceptSaleRevertIfReserved() public {
+    function test_AcceptListingRevertIfReserved() public {
         vm.prank(seller);
-        marketplace.updateSaleFrom(seller, nft, salePrice, makeAddr("Reserved for"));
+        marketplace.updateListingFrom(seller, nft, listingPrice, makeAddr("Reserved for"));
 
-        startHoax(buyer, salePrice);
-        vm.expectRevert("Marketplace: A reservation exists for this sale");
-        marketplace.acceptSale{value: salePrice}(nft);
+        startHoax(buyer, listingPrice);
+        vm.expectRevert("Marketplace: A reservation exists for this listing");
+        marketplace.acceptListing{value: listingPrice}(nft);
     }
 
-    function test_AcceptSaleRevertIfDestroyed() public {
+    function test_AcceptListingRevertIfDestroyed() public {
         vm.prank(seller);
-        marketplace.destroySaleFrom(seller, nft);
-        startHoax(buyer, salePrice);
+        marketplace.destroyListingFrom(seller, nft);
+        startHoax(buyer, listingPrice);
 
-        vm.expectRevert("Marketplace: Sale does not exists");
-        marketplace.acceptSale{value: salePrice}(nft);
+        vm.expectRevert("Marketplace: Listing does not exist");
+        marketplace.acceptListing{value: listingPrice}(nft);
     }
 }
 
-contract MarketplaceDestroySale is BaseMarketplaceTest {
+contract MarketplaceDestroyListing is BaseMarketplaceTest {
     function setUp() public override {
         super.setUp();
         erc721.mint(seller, nft);
         vm.startPrank(seller);
         erc721.approve(address(marketplace), nft);
-        marketplace.createSaleFrom(seller, nft, salePrice);
+        marketplace.createListingFrom(seller, nft, listingPrice);
         vm.stopPrank();
     }
 
-    function test_DestroySale() public {
+    function test_DestroyListing() public {
         vm.startPrank(seller);
         vm.expectEmit();
-        emit Marketplace.SaleDestroyed(nft, seller);
-        marketplace.destroySaleFrom(seller, nft);
+        emit Marketplace.ListingDestroyed(nft, seller);
+        marketplace.destroyListingFrom(seller, nft);
 
-        assertFalse(marketplace.hasSale(nft));
+        assertFalse(marketplace.hasListing(nft));
     }
 
-    function test_DestroySaleOperator() public {
+    function test_DestroyListingOperator() public {
         address operator = makeAddr("operator");
         vm.prank(seller);
         erc721.setApprovalForAll(operator, true);
 
         vm.startPrank(operator);
         vm.expectEmit();
-        emit Marketplace.SaleDestroyed(nft, seller);
-        marketplace.destroySaleFrom(seller, nft);
+        emit Marketplace.ListingDestroyed(nft, seller);
+        marketplace.destroyListingFrom(seller, nft);
 
-        assertFalse(marketplace.hasSale(nft));
+        assertFalse(marketplace.hasListing(nft));
     }
 
-    function test_DestroySaleRevertIfNotOwner() public {
+    function test_DestroyListingRevertIfNotOwner() public {
         address anyWallet = makeAddr("Any wallet");
         vm.startPrank(anyWallet);
 
-        vm.expectRevert("Marketplace: Destroy sale of NFT that is not own");
-        marketplace.destroySaleFrom(anyWallet, nft);
+        vm.expectRevert("Marketplace: Destroy listing of NFT that is not own");
+        marketplace.destroyListingFrom(anyWallet, nft);
     }
 
-    function test_DestroySaleRevertIfNotApproved() public {
+    function test_DestroyListingRevertIfNotApproved() public {
         vm.startPrank(makeAddr("Any wallet"));
 
-        vm.expectRevert("Marketplace: Only the NFT owner or its operator are allowed to destroy a sale");
-        marketplace.destroySaleFrom(seller, nft);
+        vm.expectRevert("Marketplace: Only the NFT owner or its operator are allowed to destroy a listing");
+        marketplace.destroyListingFrom(seller, nft);
     }
 }
 
 contract MarketplaceGetters is BaseMarketplaceTest {
-    function test_NFTNotOnSale() public {
+    function test_NFTNotListed() public {
         uint64 anyNft = 25;
         erc721.mint(seller, anyNft);
-        (uint256 mSalePrice, address mReservedFor) = marketplace.getSale(anyNft);
-        assertEq(mSalePrice, 0);
+        (uint256 mListingPrice, address mReservedFor) = marketplace.getListing(anyNft);
+        assertEq(mListingPrice, 0);
         assertEq(mReservedFor, address(0));
-        assertFalse(marketplace.hasSale(anyNft));
+        assertFalse(marketplace.hasListing(anyNft));
     }
 
     function test_NFTNotApproved() public {
         erc721.mint(seller, nft);
         vm.startPrank(seller);
         erc721.approve(address(marketplace), nft);
-        marketplace.createSaleFrom(seller, nft, salePrice);
+        marketplace.createListingFrom(seller, nft, listingPrice);
 
-        assertTrue(marketplace.hasSale(nft));
+        assertTrue(marketplace.hasListing(nft));
         erc721.approve(address(0), nft);
-        assertFalse(marketplace.hasSale(nft));
+        assertFalse(marketplace.hasListing(nft));
     }
 }
 
@@ -295,7 +295,7 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
 
     struct TestCase {
         string name;
-        uint256 salePrice;
+        uint256 listingPrice;
         uint8[3] fees; // [sellFee, buyFee, burnFee]
         uint256 expectedSeller;
         uint256 expectedFees;
@@ -374,7 +374,7 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
 
         tests[0] = TestCase({
             name: "Common case",
-            salePrice: 100,
+            listingPrice: 100,
             fees: [4, 1, 1],
             expectedSeller: 95,
             expectedFees: 5,
@@ -383,7 +383,7 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
 
         tests[1] = TestCase({
             name: "Price too low",
-            salePrice: 2,
+            listingPrice: 2,
             fees: [5, 5, 2],
             expectedSeller: 2,
             expectedFees: 0,
@@ -392,7 +392,7 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
 
         tests[2] = TestCase({
             name: "Round favor seller",
-            salePrice: 99,
+            listingPrice: 99,
             fees: [5, 2, 2],
             expectedSeller: 94,
             expectedFees: 5,
@@ -401,7 +401,7 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
 
         tests[3] = TestCase({
             name: "Zero fees",
-            salePrice: 50,
+            listingPrice: 50,
             fees: [0, 0, 0],
             expectedSeller: 50,
             expectedFees: 0,
@@ -410,7 +410,7 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
 
         tests[4] = TestCase({
             name: "100% sell fees",
-            salePrice: 50,
+            listingPrice: 50,
             fees: [100, 0, 0],
             expectedSeller: 0,
             expectedFees: 50,
@@ -419,7 +419,7 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
 
         tests[5] = TestCase({
             name: "100% buy fees",
-            salePrice: 50,
+            listingPrice: 50,
             fees: [0, 100, 0],
             expectedSeller: 50,
             expectedFees: 50,
@@ -428,7 +428,7 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
 
         tests[6] = TestCase({
             name: "100% burn fees",
-            salePrice: 50,
+            listingPrice: 50,
             fees: [0, 0, 100],
             expectedSeller: 0,
             expectedFees: 0,
@@ -449,17 +449,17 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
             marketplace.setMarketplacePercentFees(tc.fees[0], tc.fees[1], tc.fees[2]);
 
             vm.prank(seller);
-            marketplace.createSaleFrom(seller, nft, tc.salePrice);
+            marketplace.createListingFrom(seller, nft, tc.listingPrice);
 
             // Record initial balances
             uint256 initialSellerBalance = seller.balance;
             uint256 initialFeeBalance = feeReceiver.balance;
             uint256 initialBurnBalance = BURN_ADDRESS.balance;
 
-            // Execute sale
-            uint256 buyerPrice = tc.salePrice + (tc.salePrice * tc.fees[1]) / 100;
+            // Execute listing
+            uint256 buyerPrice = tc.listingPrice + (tc.listingPrice * tc.fees[1]) / 100;
             hoax(buyer, buyerPrice);
-            marketplace.acceptSale{value: buyerPrice}(nft);
+            marketplace.acceptListing{value: buyerPrice}(nft);
 
             // Verify balances
             assertEq(
@@ -487,29 +487,29 @@ contract MarketplaceFeeManagement is BaseMarketplaceTest {
         }
     }
 
-    function test_FeeCalculationFuzz(uint8 sellFee, uint8 buyFee, uint8 burnFee, uint256 salePrice) public {
+    function test_FeeCalculationFuzz(uint8 sellFee, uint8 buyFee, uint8 burnFee, uint256 listingPrice) public {
         vm.assume(sellFee <= 100);
         vm.assume(burnFee <= 100);
         vm.assume(sellFee + burnFee <= 100);
-        vm.assume(salePrice > 0 && salePrice < 1_000_000 ether);
+        vm.assume(listingPrice > 0 && listingPrice < 1_000_000 ether);
 
         marketplace.setMarketplaceFeesReceiver(feeReceiver);
         marketplace.setMarketplacePercentFees(sellFee, buyFee, burnFee);
 
         vm.prank(seller);
-        marketplace.createSaleFrom(seller, nft, salePrice);
+        marketplace.createListingFrom(seller, nft, listingPrice);
 
         uint256 initialSellerBalance = seller.balance;
         uint256 initialFeeBalance = feeReceiver.balance;
         uint256 initialBurnBalance = BURN_ADDRESS.balance;
 
-        uint256 finalPrice = salePrice + (salePrice * buyFee) / 100;
+        uint256 finalPrice = listingPrice + (listingPrice * buyFee) / 100;
         hoax(buyer, finalPrice);
-        marketplace.acceptSale{value: finalPrice}(nft);
+        marketplace.acceptListing{value: finalPrice}(nft);
 
-        uint256 sellerAmount = salePrice - (salePrice * sellFee) / 100 - (salePrice * burnFee) / 100;
-        uint256 feeAmount = (salePrice * sellFee) / 100 + (salePrice * buyFee) / 100;
-        uint256 burnAmount = (salePrice * burnFee) / 100;
+        uint256 sellerAmount = listingPrice - (listingPrice * sellFee) / 100 - (listingPrice * burnFee) / 100;
+        uint256 feeAmount = (listingPrice * sellFee) / 100 + (listingPrice * buyFee) / 100;
+        uint256 burnAmount = (listingPrice * burnFee) / 100;
 
         assertEq(seller.balance - initialSellerBalance, sellerAmount, "Incorrect seller balance");
         assertEq(feeReceiver.balance - initialFeeBalance, feeAmount, "Incorrect fee receiver balance");
