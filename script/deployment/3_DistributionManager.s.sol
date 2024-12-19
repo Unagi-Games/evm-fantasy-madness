@@ -5,7 +5,7 @@ import "forge-std/Script.sol";
 import {DeployNFT} from "./1_NFT.s.sol";
 import {DistributionManager} from "@/DistributionManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {NFT} from "@/NFT.sol";
 
 contract DeployDistributionManager is Script {
     function run() external {
@@ -14,6 +14,8 @@ contract DeployDistributionManager is Script {
         address admin = vm.envAddress("ADMIN_TIMELOCK_2D");
         address pauser = vm.envAddress("ADMIN");
         address distributor = vm.envAddress("BCI");
+        IERC20 token = IERC20(tokenAddress);
+        NFT nft = NFT(nftAddress);
 
         vm.startBroadcast();
 
@@ -26,6 +28,8 @@ contract DeployDistributionManager is Script {
         distributionManager.grantRole(distributionManager.PAUSER_ROLE(), pauser);
         distributionManager.grantRole(distributionManager.DISTRIBUTOR_ROLE(), distributor);
         distributionManager.revokeRole(distributionManager.DEFAULT_ADMIN_ROLE(), msg.sender);
+        nft.grantRole(nft.MINT_ROLE(), address(distributionManager));
+        nft.renounceRole(nft.DEFAULT_ADMIN_ROLE(), msg.sender);
 
         vm.stopBroadcast();
         vm.startBroadcast(vm.envUint("BCI_PRIVATE_KEY"));
@@ -34,9 +38,7 @@ contract DeployDistributionManager is Script {
             vm.addr(vm.envUint("BCI_PRIVATE_KEY")) == vm.envAddress("BCI"), "BCI_PRIVATE_KEY does not match BCI address"
         );
 
-        IERC20 token = IERC20(tokenAddress);
         token.approve(address(distributionManager), type(uint256).max);
-        IERC721 nft = IERC721(nftAddress);
         nft.setApprovalForAll(address(distributionManager), true);
 
         vm.stopBroadcast();

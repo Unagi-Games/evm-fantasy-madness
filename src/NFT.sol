@@ -9,7 +9,9 @@ import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /**
  * @title NFT
- * @dev Implementation of IERC721. NFT is described using the ERC721Metadata extension.
+ * @dev Implementation of an ERC721 token with metadata extension including rarity and variant attributes.
+ * Each NFT has specific metadata containing a template, ticker, rarity level (COMMON, RARE, EPIC),
+ * and variant type (UP, DOWN). Token URIs are constructed from these attributes.
  * See https://github.com/ethereum/EIPs/blob/34a2d1fcdf3185ca39969a7b076409548307b63b/EIPS/eip-721.md#specification
  * @custom:security-contact security@unagi.ch
  */
@@ -19,11 +21,34 @@ contract NFT is AccessControl, Pausable, ERC721 {
     bytes32 public constant MINT_ROLE = keccak256("MINT_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
-    uint256 private _tokenIds;
+    enum Rarity {
+        COMMON,
+        RARE,
+        EPIC
+    }
+
+    string[3] private RarityNames = ["COMMON", "RARE", "EPIC"];
+
+    enum Variant {
+        UP,
+        DOWN
+    }
+
+    string[2] private VariantNames = ["UP", "DOWN"];
+
+    struct Metadata {
+        string template;
+        string ticker;
+        Rarity rarity;
+        Variant variant;
+    }
+
+    uint256 private _tokenId;
+    mapping(uint256 tokenId => Metadata) private _metadata;
     string private _baseURIValue;
 
     constructor(uint256 initialId, string memory name, string memory symbol) ERC721(name, symbol) {
-        _tokenIds = initialId;
+        _tokenId = initialId;
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
     }
 
@@ -58,35 +83,23 @@ contract NFT is AccessControl, Pausable, ERC721 {
 
     /**
      * @dev Allow to mint a new NFT.
+     * @param to The address that will own the minted NFT
+     * @param metadata The NFT metadata containing template, ticker, rarity and variant
+     * @return tokenId The ID of the newly minted NFT
      *
      * Requirements:
-     *
      * - Caller must have role MINT_ROLE.
      */
-    function safeMint(address to) public onlyRole(MINT_ROLE) {
-        _tokenIds++;
-        _safeMint(to, _tokenIds);
-    }
-
-    /**
-     * @dev Allow to batch mint new NFTs.
-     *
-     * Requirements:
-     *
-     * - Caller must have role MINT_ROLE.
-     */
-    function batchSafeMint(address[] memory to) public onlyRole(MINT_ROLE) {
-        uint256 length = to.length;
-        for (uint256 i = 0; i < length;) {
-            safeMint(to[i]);
-            unchecked {
-                ++i;
-            }
-        }
+    function safeMint(address to, Metadata memory metadata) public onlyRole(MINT_ROLE) returns (uint256) {
+        _tokenId++;
+        _safeMint(to, _tokenId);
+        _metadata[_tokenId] = metadata;
+        return _tokenId;
     }
 
     /**
      * @dev Allow to set base URI.
+     * @param baseURIValue The base URI to be set for the NFTs
      *
      * Requirements:
      *
@@ -98,14 +111,33 @@ contract NFT is AccessControl, Pausable, ERC721 {
 
     /**
      * @dev Base URI for computing {tokenURI}.
+     * @return The base URI string
      */
     function _baseURI() internal view virtual override returns (string memory) {
         return _baseURIValue;
     }
 
+    /**
+     * @dev Returns the URI for a given token ID. Format: baseURI/ticker/template/variant/rarity/metadata.json
+     * @param tokenId The token ID to get the URI for
+     * @return The token URI string
+     */
     function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
         _requireOwned(tokenId);
-
-        return string(abi.encodePacked(_baseURI(), "/", Strings.toHexString(tokenId, 32)));
+        Metadata memory metadata = _metadata[tokenId];
+        return string(
+            abi.encodePacked(
+                _baseURI(),
+                "/",
+                metadata.ticker,
+                "/",
+                metadata.template,
+                "/",
+                VariantNames[uint256(metadata.variant)],
+                "/",
+                RarityNames[uint256(metadata.rarity)],
+                "/metadata.json"
+            )
+        );
     }
 }

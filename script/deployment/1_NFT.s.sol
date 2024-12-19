@@ -27,7 +27,6 @@ contract DeployNFT is Script {
         nft.grantRole(nft.DEFAULT_ADMIN_ROLE(), admin);
         nft.grantRole(nft.MINT_ROLE(), minter);
         nft.grantRole(nft.PAUSER_ROLE(), pauser);
-        nft.renounceRole(nft.DEFAULT_ADMIN_ROLE(), msg.sender);
 
         vm.stopBroadcast();
     }
